@@ -80,22 +80,69 @@ export async function POST(req: NextRequest) {
     if (geminiApiKey) {
       try {
         const genAI = new GoogleGenerativeAI(geminiApiKey);
-        const model = genAI.getGenerativeModel({
-          model: 'gemini-2.0-flash',
-          systemInstruction: systemPrompt,
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 1500,
+        
+        // Format & sanitize message history for Gemini API
+        // Rule: Gemini requires alternating user/model sequence and MUST start with 'user'
+        const formattedContents: Array<{ role: 'user' | 'model'; parts: [{ text: string }] }> = [];
+
+        if (messages.length === 0) {
+          formattedContents.push({
+            role: 'user',
+            parts: [{ text: 'The candidate just joined the phone call. Deliver Turn 1: Identity, disclosure, and consent.' }]
+          });
+        } else {
+          let hasStartedWithUser = false;
+
+          for (const m of messages) {
+            const role = m.role === 'assistant' ? 'model' : 'user';
+            
+            // If the very first message is from model/assistant, prefix with user call connect
+            if (!hasStartedWithUser && role === 'model') {
+              formattedContents.push({
+                role: 'user',
+                parts: [{ text: 'The candidate connected to the phone screen.' }]
+              });
+              hasStartedWithUser = true;
+            } else if (role === 'user') {
+              hasStartedWithUser = true;
+            }
+
+            const lastItem = formattedContents[formattedContents.length - 1];
+            if (lastItem && lastItem.role === role) {
+              // Merge identical consecutive roles
+              lastItem.parts[0].text += `\n${m.content}`;
+            } else {
+              formattedContents.push({
+                role,
+                parts: [{ text: m.content || ' ' }]
+              });
+            }
           }
-        });
+        }
 
-        // Format history for Gemini SDK
-        const contents = messages.map(m => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }]
-        }));
+        // Try gemini-1.5-flash or gemini-2.0-flash
+        let model;
+        try {
+          model = genAI.getGenerativeModel({
+            model: 'gemini-1.5-flash',
+            systemInstruction: systemPrompt,
+            generationConfig: {
+              temperature: 0.3,
+              maxOutputTokens: 1500,
+            }
+          });
+        } catch {
+          model = genAI.getGenerativeModel({
+            model: 'gemini-2.0-flash',
+            systemInstruction: systemPrompt,
+            generationConfig: {
+              temperature: 0.3,
+              maxOutputTokens: 1500,
+            }
+          });
+        }
 
-        const result = await model.generateContent({ contents });
+        const result = await model.generateContent({ contents: formattedContents });
         const responseText = result.response.text();
 
         return NextResponse.json(
@@ -112,13 +159,13 @@ export async function POST(req: NextRequest) {
           }
         );
       } catch (geminiError: any) {
-        console.error('[Gemini API Error]', geminiError);
+        console.error('[Gemini API Live Error]', geminiError?.message || geminiError);
         const simulated = generateSimulatedTurn(messages, currentRole);
         return NextResponse.json({
           role: 'assistant',
           content: simulated.content,
           mode: 'simulation_fallback',
-          errorNote: `Gemini API error: ${geminiError?.message || 'Invalid key'}. Switched to local simulation.`
+          errorNote: `Gemini API error: ${geminiError?.message || 'Check key'}. Safe simulation fallback activated.`
         });
       }
     }
