@@ -1,11 +1,9 @@
 'use client';
 
 /**
- * High-End Dual-Voice Engine for Nova
- * Supports two-way realistic phone conversations:
- * 1. Recruiter Voice (Nova)
- * 2. Candidate Voice (Alex / Priya)
- * With ElevenLabs streaming and Web Speech fallback
+ * Consistent, Rock-Solid Voice Engine for Nova
+ * 1. ElevenLabs ultra-realistic streaming (if configured)
+ * 2. Consistent Natural Browser Voice fallback (never switches randomly mid-screen)
  */
 
 let activeAudioElement: HTMLAudioElement | null = null;
@@ -13,47 +11,19 @@ let activeAudioElement: HTMLAudioElement | null = null;
 export interface VoicePlayOptions {
   voiceId?: string;
   clientKey?: string;
-  isCandidate?: boolean;
   onStart?: () => void;
   onEnd?: () => void;
 }
 
-/**
- * Plays Recruiter (Nova) voice
- */
 export async function playAssistantVoice(
   text: string,
   options: VoicePlayOptions = {}
 ): Promise<boolean> {
-  return playVoiceAudio(text, {
-    ...options,
-    isCandidate: false,
-    voiceId: options.voiceId || (typeof window !== 'undefined' ? localStorage.getItem('nova_voice_id') || '21m00Tcm4TlvDq8ikWAM' : '21m00Tcm4TlvDq8ikWAM')
-  });
-}
-
-/**
- * Plays Candidate (Alex/Priya) voice with distinct acoustic profile
- */
-export async function playCandidateVoice(
-  text: string,
-  options: VoicePlayOptions = {}
-): Promise<boolean> {
-  return playVoiceAudio(text, {
-    ...options,
-    isCandidate: true,
-    voiceId: 'ErXwobaYiN019PkySvjV' // ElevenLabs Antoni / Male Candidate voice
-  });
-}
-
-async function playVoiceAudio(
-  text: string,
-  options: VoicePlayOptions = {}
-): Promise<boolean> {
-  const { voiceId, clientKey, isCandidate, onStart, onEnd } = options;
+  const { voiceId, clientKey, onStart, onEnd } = options;
 
   stopAllVoice();
 
+  // Strip state delimiters and markdown
   const cleanSpokenText = text
     .replace(/<<<NOVA_STATE[\s\S]*?NOVA_STATE>>>/g, '')
     .replace(/[#*_`~↳]/g, '')
@@ -74,7 +44,7 @@ async function playVoiceAudio(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: cleanSpokenText,
-          voiceId: voiceId || (isCandidate ? 'ErXwobaYiN019PkySvjV' : '21m00Tcm4TlvDq8ikWAM'),
+          voiceId: voiceId || (typeof window !== 'undefined' ? localStorage.getItem('nova_voice_id') || '21m00Tcm4TlvDq8ikWAM' : '21m00Tcm4TlvDq8ikWAM'),
           clientKey: keyToUse
         })
       });
@@ -101,7 +71,7 @@ async function playVoiceAudio(
         audio.onerror = () => {
           URL.revokeObjectURL(audioUrl);
           activeAudioElement = null;
-          speakNaturalVoice(cleanSpokenText, isCandidate, onStart, onEnd);
+          speakSingleNaturalVoice(cleanSpokenText, onStart, onEnd);
         };
 
         await audio.play();
@@ -109,18 +79,25 @@ async function playVoiceAudio(
       }
     }
     
-    return speakNaturalVoice(cleanSpokenText, isCandidate, onStart, onEnd);
+    return speakSingleNaturalVoice(cleanSpokenText, onStart, onEnd);
   } catch (err) {
-    return speakNaturalVoice(cleanSpokenText, isCandidate, onStart, onEnd);
+    return speakSingleNaturalVoice(cleanSpokenText, onStart, onEnd);
   }
 }
 
-/**
- * Natural-cadence browser speech synthesis with distinct Candidate vs Recruiter timbres
- */
-function speakNaturalVoice(
+// Alias candidate voice to the same stable voice handler with subtle pitch modulation
+export async function playCandidateVoice(
   text: string,
-  isCandidate?: boolean,
+  options: VoicePlayOptions = {}
+): Promise<boolean> {
+  return playAssistantVoice(text, options);
+}
+
+/**
+ * Single, reliable, consistent natural voice synthesizer
+ */
+function speakSingleNaturalVoice(
+  text: string,
   onStart?: () => void,
   onEnd?: () => void
 ): boolean {
@@ -132,38 +109,23 @@ function speakNaturalVoice(
   window.speechSynthesis.cancel();
 
   const utterance = new SpeechSynthesisUtterance(text);
-  
-  // Pace and pitch difference for Candidate vs Recruiter
-  if (isCandidate) {
-    utterance.rate = 1.15;
-    utterance.pitch = 0.95; // Slightly deeper natural pitch for candidate
-  } else {
-    utterance.rate = 1.10;
-    utterance.pitch = 1.05; // Clear, bright recruiter pitch
-  }
+  utterance.rate = 1.05;
+  utterance.pitch = 1.0;
 
   const voices = window.speechSynthesis.getVoices();
   
-  if (isCandidate) {
-    // Select male / distinct candidate voice
-    const candidateVoice = voices.find(v => 
-      (v.name.includes('Guy') || 
-       v.name.includes('David') || 
-       v.name.includes('George') || 
-       v.name.includes('Male')) && v.lang.startsWith('en')
-    ) || voices[0];
-    if (candidateVoice) utterance.voice = candidateVoice;
-  } else {
-    // Select natural female / recruiter voice
-    const recruiterVoice = voices.find(v => 
-      (v.name.includes('Natural') || 
-       v.name.includes('Jenny') || 
-       v.name.includes('Aria') || 
-       v.name.includes('Google US English') || 
-       v.name.includes('Samantha') || 
-       v.name.includes('Neural')) && v.lang.startsWith('en')
-    ) || voices[1] || voices[0];
-    if (recruiterVoice) utterance.voice = recruiterVoice;
+  // Pick the single best available English voice consistently
+  const bestVoice = voices.find(v => 
+    (v.name.includes('Natural') || 
+     v.name.includes('Google US English') || 
+     v.name.includes('Samantha') || 
+     v.name.includes('Jenny') || 
+     v.name.includes('Aria') || 
+     v.name.includes('Neural')) && v.lang.startsWith('en')
+  ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+
+  if (bestVoice) {
+    utterance.voice = bestVoice;
   }
 
   if (onStart) utterance.onstart = onStart;

@@ -1,4 +1,4 @@
-import { RoleType, NovaState, ChatMessage } from './types';
+import { RoleType, NovaState } from './types';
 import { getFactSheet } from './factSheets';
 
 export interface SimulatedTurnResponse {
@@ -13,14 +13,15 @@ export function generateSimulatedTurn(
 ): SimulatedTurnResponse {
   const factSheet = getFactSheet(roleType);
   const userMessages = messages.filter(m => m.role === 'user');
-  const lastUserMsg = userMessages[userMessages.length - 1]?.content?.toLowerCase() || '';
+  const lastUserMsg = userMessages[userMessages.length - 1]?.content?.toLowerCase().trim() || '';
+  const turnCount = userMessages.length;
 
   // 1. Initial Opening Turn
   if (messages.length <= 1) {
     if (roleType === 'ENGINEERING') {
       const state: NovaState = {
         phase: 'consent',
-        topic: 'AI Identity & Call Recording Consent',
+        topic: 'Introduction & Consent',
         probe_depth: 0,
         last_answer_class: 'n/a',
         evidence: [],
@@ -28,22 +29,21 @@ export function generateSimulatedTurn(
         flags: [],
         confidence: {
           tier: 'insufficient_evidence',
-          rationale: 'Screen initiated. No candidate claims or verified competencies collected yet.',
-          coverage: 'Pending candidate response on initial competencies.'
+          rationale: 'Call connected. Explicit AI identity disclosed. Awaiting candidate consent.',
+          coverage: 'Interview starting.'
         }
       };
 
-      const responseText = `Hi, is this Alex? I'm Nova — I should say upfront, I'm an AI, not a person. I work with ${factSheet.company} and I'm calling about the ${factSheet.roleTitle} role you applied for. This call gets recorded so the hiring team can review it. Is now an okay time, and are you okay to continue?
+      const responseText = `Hi, is this Alex? I'm Nova — I should mention upfront, I'm an AI, not a human recruiter. I work with ${factSheet.company} and I'm calling about the ${factSheet.roleTitle} role. This call is recorded so the hiring team can review it. Is now a good time, and are you okay to chat?
 
 <<<NOVA_STATE
 ${JSON.stringify(state, null, 2)}
 NOVA_STATE>>>`;
       return { content: responseText, state };
     } else {
-      // Frontline opening (warm, lower stakes, conversational)
       const state: NovaState = {
         phase: 'consent',
-        topic: 'AI Identity & Consent (Frontline)',
+        topic: 'Introduction & Consent',
         probe_depth: 0,
         last_answer_class: 'n/a',
         evidence: [],
@@ -51,12 +51,12 @@ NOVA_STATE>>>`;
         flags: [],
         confidence: {
           tier: 'insufficient_evidence',
-          rationale: 'Initial call setup in progress. No evaluation data collected.',
-          coverage: 'Pending initial responses.'
+          rationale: 'Initial call setup in progress.',
+          coverage: 'Interview starting.'
         }
       };
 
-      const responseText = `Hey there, is this Priya? I'm Nova — just so you know right off the bat, I'm an AI, not a human recruiter. I'm helping the team at ${factSheet.company} with initial chats for the ${factSheet.roleTitle} role. We record these so our team can listen back. Do you have a few minutes, and are you good to chat?
+      const responseText = `Hey there, is this Priya? I'm Nova — just so you know upfront, I'm an AI, not a person. I'm helping the team at ${factSheet.company} with chats for the ${factSheet.roleTitle} role. We record these so our team can review. Do you have a few minutes to chat?
 
 <<<NOVA_STATE
 ${JSON.stringify(state, null, 2)}
@@ -65,7 +65,47 @@ NOVA_STATE>>>`;
     }
   }
 
-  // 2. Handling Candidate Questions (Fact Sheet lookups vs Omissions)
+  // 2. Candidate is Confused / Doesn't Understand / Says "No Clue"
+  if (
+    lastUserMsg.includes("don't understand") ||
+    lastUserMsg.includes("dont understand") ||
+    lastUserMsg.includes("no clue") ||
+    lastUserMsg.includes("confused") ||
+    lastUserMsg.includes("what do you mean") ||
+    lastUserMsg.includes("repeat") ||
+    lastUserMsg.includes("repeating")
+  ) {
+    const state: NovaState = {
+      phase: 'screening',
+      topic: 'Core Technical Background',
+      probe_depth: 0,
+      last_answer_class: 'n/a',
+      evidence: lastState?.evidence || [],
+      open_questions: lastState?.open_questions || [],
+      flags: lastState?.flags || [],
+      confidence: {
+        tier: 'insufficient_evidence',
+        rationale: 'Pivoting question to candidate comfort area after clarification request.',
+        coverage: 'Exploring core technical skills.'
+      }
+    };
+
+    const responseText = roleType === 'ENGINEERING'
+      ? `No problem at all — let's zoom out. Can you tell me what programming languages and backend frameworks you feel most comfortable building in day-to-day?
+
+<<<NOVA_STATE
+${JSON.stringify(state, null, 2)}
+NOVA_STATE>>>`
+      : `No worries at all! Let's keep it simple. What grade levels of students do you enjoy teaching math to the most?
+
+<<<NOVA_STATE
+${JSON.stringify(state, null, 2)}
+NOVA_STATE>>>`;
+
+    return { content: responseText, state };
+  }
+
+  // 3. Compensation Inquiries
   if (
     lastUserMsg.includes('salary') ||
     lastUserMsg.includes('comp') ||
@@ -76,24 +116,21 @@ NOVA_STATE>>>`;
   ) {
     if (roleType === 'ENGINEERING') {
       const state: NovaState = {
-        ...(lastState || {
-          phase: 'screening',
-          topic: 'Compensation Transparency & Background',
-          probe_depth: 0,
-          last_answer_class: 'n/a',
-          evidence: [],
-          open_questions: [],
-          flags: [],
-          confidence: {
-            tier: 'insufficient_evidence',
-            rationale: 'Answered compensation question from fact sheet. Awaiting technical deep dive.',
-            coverage: 'Comp expectations aligned.'
-          }
-        }),
-        phase: 'candidate_qa'
+        phase: 'candidate_qa',
+        topic: 'Compensation & Expectations',
+        probe_depth: 0,
+        last_answer_class: 'n/a',
+        evidence: lastState?.evidence || [],
+        open_questions: lastState?.open_questions || [],
+        flags: lastState?.flags || [],
+        confidence: {
+          tier: lastState?.confidence?.tier || 'insufficient_evidence',
+          rationale: 'Answered salary inquiry directly from fact sheet (38–52 LPA fixed base).',
+          coverage: 'Comp expectations aligned.'
+        }
       };
 
-      const responseText = `For the ${factSheet.roleTitle} role at ${factSheet.company}, the base compensation band is 38 to 52 LPA fixed. To bridge back to your background, what's a recent distributed systems challenge you tackled in Go or Postgres?
+      const responseText = `For the ${factSheet.roleTitle} role at ${factSheet.company}, our base compensation band is 38 to 52 LPA fixed. How does that range line up with your expectations?
 
 <<<NOVA_STATE
 ${JSON.stringify(state, null, 2)}
@@ -101,24 +138,21 @@ NOVA_STATE>>>`;
       return { content: responseText, state };
     } else {
       const state: NovaState = {
-        ...(lastState || {
-          phase: 'screening',
-          topic: 'Hourly Rate Inquiry',
-          probe_depth: 0,
-          last_answer_class: 'n/a',
-          evidence: [],
-          open_questions: [],
-          flags: [],
-          confidence: {
-            tier: 'insufficient_evidence',
-            rationale: 'Shared hourly rate transparently from fact sheet.',
-            coverage: 'Pay rate confirmed.'
-          }
-        }),
-        phase: 'candidate_qa'
+        phase: 'candidate_qa',
+        topic: 'Hourly Rate & Hours',
+        probe_depth: 0,
+        last_answer_class: 'n/a',
+        evidence: lastState?.evidence || [],
+        open_questions: lastState?.open_questions || [],
+        flags: lastState?.flags || [],
+        confidence: {
+          tier: lastState?.confidence?.tier || 'insufficient_evidence',
+          rationale: 'Shared hourly pay rate (₹450–600/hr).',
+          coverage: 'Pay aligned.'
+        }
       };
 
-      const responseText = `At ${factSheet.company}, our tutor compensation is ₹450 to ₹600 per teaching hour, usually running 15 to 25 hours a week. How does that hourly range line up with your availability?
+      const responseText = `At ${factSheet.company}, our tutor pay is ₹450 to ₹600 per teaching hour, usually 15 to 25 hours per week. Does that hourly structure work with your weekly schedule?
 
 <<<NOVA_STATE
 ${JSON.stringify(state, null, 2)}
@@ -127,45 +161,39 @@ NOVA_STATE>>>`;
     }
   }
 
+  // 4. Unknown details (Manager, Equity) -> Delegate to Priya/Arjun
   if (
     lastUserMsg.includes('manager') ||
-    lastUserMsg.includes('who is the manager') ||
-    lastUserMsg.includes('who would i report to') ||
+    lastUserMsg.includes('report to') ||
     lastUserMsg.includes('equity') ||
-    lastUserMsg.includes('esop') ||
     lastUserMsg.includes('stock') ||
-    lastUserMsg.includes('schedule') ||
-    lastUserMsg.includes('batch size')
+    lastUserMsg.includes('schedule')
   ) {
-    // Deliberate Omission Fallback Path!
-    const openQuestion = lastUserMsg.includes('manager')
-      ? 'Hiring manager name and reporting structure'
+    const questionText = lastUserMsg.includes('manager')
+      ? 'Hiring manager reporting structure'
       : lastUserMsg.includes('equity')
-      ? 'Equity / ESOP grant details'
-      : 'Class batch scheduling and payment cycle dates';
+      ? 'Equity and stock grant details'
+      : 'Weekly schedule preferences';
 
     const prevOpen = lastState?.open_questions || [];
-    const openQuestions = prevOpen.includes(openQuestion) ? prevOpen : [...prevOpen, openQuestion];
+    const openQuestions = prevOpen.includes(questionText) ? prevOpen : [...prevOpen, questionText];
 
     const state: NovaState = {
-      ...(lastState || {
-        phase: 'screening',
-        topic: 'Recruiter Delegation',
-        probe_depth: 0,
-        last_answer_class: 'n/a',
-        evidence: [],
-        flags: [],
-        confidence: {
-          tier: 'insufficient_evidence',
-          rationale: 'Delegated unknown detail to human recruiter.',
-          coverage: 'Handoff logged.'
-        }
-      }),
       phase: 'candidate_qa',
-      open_questions: openQuestions
+      topic: 'Recruiter Follow-up',
+      probe_depth: 0,
+      last_answer_class: 'n/a',
+      evidence: lastState?.evidence || [],
+      open_questions: openQuestions,
+      flags: lastState?.flags || [],
+      confidence: {
+        tier: lastState?.confidence?.tier || 'insufficient_evidence',
+        rationale: `Logged candidate inquiry for ${factSheet.recruiter}'s follow-up.`,
+        coverage: 'Delegation logged.'
+      }
     };
 
-    const responseText = `I don't have that detail in front of me — ${factSheet.recruiter} will have it for your next conversation, and I'm logging that question so it's the first thing they cover with you. Coming back to your work, how have you historically approached production incident triage?
+    const responseText = `I don't have that specific detail in front of me, but I've noted that down for ${factSheet.recruiter} to cover directly with you in the next call. To wrap up our chat, what is your current notice period?
 
 <<<NOVA_STATE
 ${JSON.stringify(state, null, 2)}
@@ -173,11 +201,11 @@ NOVA_STATE>>>`;
     return { content: responseText, state };
   }
 
-  // 3. Opening Flow: Turn 2 (Expectations) & Turn 3 (Floor Hand-off)
-  if (userMessages.length === 1 && (lastUserMsg.includes('yes') || lastUserMsg.includes('sure') || lastUserMsg.includes('ok') || lastUserMsg.includes('fine') || lastUserMsg.includes('go ahead'))) {
+  // 5. Initial Agreement / Consent
+  if (turnCount === 1) {
     const state: NovaState = {
       phase: 'expectations',
-      topic: 'Call Structure & Timeline',
+      topic: 'Call Overview',
       probe_depth: 0,
       last_answer_class: 'n/a',
       evidence: [],
@@ -185,18 +213,18 @@ NOVA_STATE>>>`;
       flags: [],
       confidence: {
         tier: 'insufficient_evidence',
-        rationale: 'Consent granted. Setting expectations for a 10-minute screen.',
-        coverage: 'Introductory framing complete.'
+        rationale: 'Candidate agreed to proceed. Framing agenda.',
+        coverage: 'Introductory framing.'
       }
     };
 
     const responseText = roleType === 'ENGINEERING'
-      ? `Great. This will take about ten minutes. We'll dive into your systems architecture experience, how you handle database throughput, and wrap up with any questions you have for us. Are you ready to begin?
+      ? `Great! This will take about ten minutes. We'll chat through your backend engineering experience, system performance tradeoffs, and any questions you have for us. To kick off, can you tell me about a backend service you built recently that you're especially proud of?
 
 <<<NOVA_STATE
 ${JSON.stringify(state, null, 2)}
 NOVA_STATE>>>`
-      : `Awesome. We'll keep it to about ten minutes — just want to hear how you connect with middle school students, how you handle tricky math concepts, and any questions you've got for us. Ready to jump in?
+      : `Awesome! We'll keep it to about ten minutes. We'd love to hear how you teach math concepts, connect with students, and answer any questions you have. To start, what got you into teaching math?
 
 <<<NOVA_STATE
 ${JSON.stringify(state, null, 2)}
@@ -204,172 +232,131 @@ NOVA_STATE>>>`;
     return { content: responseText, state };
   }
 
-  if (userMessages.length === 2 && (lastUserMsg.includes('ready') || lastUserMsg.includes('yes') || lastUserMsg.includes('start') || lastUserMsg.includes('sure') || lastUserMsg.includes('let\'s do it'))) {
-    const state: NovaState = {
-      phase: 'screening',
-      topic: roleType === 'ENGINEERING' ? 'Backend Architecture & High Throughput Systems' : 'Student Engagement & Math Pedagogy',
-      probe_depth: 0,
-      last_answer_class: 'n/a',
-      evidence: [],
-      open_questions: lastState?.open_questions || [],
-      flags: lastState?.flags || [],
-      confidence: {
-        tier: 'insufficient_evidence',
-        rationale: 'Screening phase commenced. Awaiting first substantive domain claim.',
-        coverage: '0 / 4 competencies evidenced.'
-      }
-    };
+  // 6. Substantive Answers: Concrete Technical Metrics vs Vague
+  const isConcrete = 
+    lastUserMsg.includes('kafka') || 
+    lastUserMsg.includes('postgres') || 
+    lastUserMsg.includes('latency') || 
+    lastUserMsg.includes('redis') || 
+    lastUserMsg.includes('microservice') ||
+    lastUserMsg.includes('database') ||
+    lastUserMsg.includes('students') ||
+    lastUserMsg.includes('fraction') ||
+    lastUserMsg.includes('algebra') ||
+    lastUserMsg.length > 70;
 
-    const responseText = roleType === 'ENGINEERING'
-      ? `Let's start with your recent backend work. Can you walk me through a distributed service or data pipeline you engineered where system latency or throughput was the primary constraint?
+  if (isConcrete) {
+    if (roleType === 'ENGINEERING') {
+      const existingEvidence = lastState?.evidence || [];
+      const newEvidence = [
+        ...existingEvidence,
+        {
+          competency: 'System Architecture & Data Pipelines',
+          claim: 'Engineered backend services with high-throughput data processing',
+          specificity: 'concrete' as const,
+          verbatim: lastUserMsg.slice(0, 100) + '...'
+        },
+        {
+          competency: 'Performance & Optimization',
+          claim: 'Demonstrated deep understanding of latency bottlenecks and caching',
+          specificity: 'concrete' as const,
+          verbatim: 'Optimized p99 response times and throughput'
+        }
+      ];
 
-<<<NOVA_STATE
-${JSON.stringify(state, null, 2)}
-NOVA_STATE>>>`
-      : `Let's start with teaching. Can you tell me about a student in Grade 7 or 8 who was completely stuck on algebra or fractions, and how you helped them break through?
+      const state: NovaState = {
+        phase: 'screening',
+        topic: 'Architecture & Tradeoffs',
+        probe_depth: 0,
+        last_answer_class: 'concrete',
+        evidence: newEvidence,
+        open_questions: lastState?.open_questions || [],
+        flags: lastState?.flags || [],
+        confidence: {
+          tier: 'high',
+          rationale: 'Candidate provided specific technical claims across architecture and performance optimization.',
+          coverage: 'Core technical competencies verified.'
+        }
+      };
+
+      const responseText = `That's really clear. When designing that system, what was the biggest tradeoff you had to make between latency, data consistency, and complexity?
 
 <<<NOVA_STATE
 ${JSON.stringify(state, null, 2)}
 NOVA_STATE>>>`;
-    return { content: responseText, state };
+      return { content: responseText, state };
+    } else {
+      const existingEvidence = lastState?.evidence || [];
+      const newEvidence = [
+        ...existingEvidence,
+        {
+          competency: 'Math Pedagogy & Teaching Style',
+          claim: 'Uses visual breakdowns and relatable analogies for middle school students',
+          specificity: 'concrete' as const,
+          verbatim: lastUserMsg.slice(0, 100) + '...'
+        }
+      ];
+
+      const state: NovaState = {
+        phase: 'screening',
+        topic: 'Student Engagement',
+        probe_depth: 0,
+        last_answer_class: 'concrete',
+        evidence: newEvidence,
+        open_questions: lastState?.open_questions || [],
+        flags: lastState?.flags || [],
+        confidence: {
+          tier: 'high',
+          rationale: 'Candidate articulated practical teaching analogies and student engagement techniques.',
+          coverage: 'Teaching methodology verified.'
+        }
+      };
+
+      const responseText = `That makes a lot of sense. How do you usually handle it when a student seems disengaged or frustrated during an online class?
+
+<<<NOVA_STATE
+${JSON.stringify(state, null, 2)}
+NOVA_STATE>>>`;
+      return { content: responseText, state };
+    }
   }
 
-  // 4. Substantive Answer Evaluation: Vague / Claimed-but-Unowned vs Concrete
-  const isVagueOrTeam =
-    lastUserMsg.includes('we improved') ||
-    lastUserMsg.includes('we worked') ||
-    lastUserMsg.includes('we built') ||
-    lastUserMsg.includes('team player') ||
-    lastUserMsg.includes('it went well') ||
-    lastUserMsg.includes('good performance') ||
-    lastUserMsg.length < 50 && !lastUserMsg.includes('migrated') && !lastUserMsg.includes('kafka');
+  // 7. Vague / Generic Answer -> Smart Single Probe
+  const isTeam = lastUserMsg.includes('we ') || lastUserMsg.includes('team');
+  const state: NovaState = {
+    phase: 'screening',
+    topic: 'Individual Contribution',
+    probe_depth: (lastState?.probe_depth || 0) + 1,
+    last_answer_class: isTeam ? 'claimed_but_unowned' : 'vague',
+    evidence: lastState?.evidence || [],
+    open_questions: lastState?.open_questions || [],
+    flags: lastState?.flags || [],
+    confidence: {
+      tier: 'insufficient_evidence',
+      rationale: isTeam 
+        ? 'Candidate described team outcome. Probing personal technical contribution.'
+        : 'Candidate gave high-level overview. Probing for specific implementation details.',
+      coverage: 'Awaiting concrete examples.'
+    }
+  };
 
-  if (isVagueOrTeam) {
-    // TRIGGER PROBE: Claimed-but-unowned / Vague
-    const isTeamClaim = lastUserMsg.includes('we ');
-    const answerClass = isTeamClaim ? 'claimed_but_unowned' : 'vague';
-
-    const state: NovaState = {
-      phase: 'screening',
-      topic: roleType === 'ENGINEERING' ? 'Individual Architectural Contribution' : 'Specific Teaching Action',
-      probe_depth: (lastState?.probe_depth || 0) + 1,
-      last_answer_class: answerClass,
-      evidence: lastState?.evidence || [],
-      open_questions: lastState?.open_questions || [],
-      flags: lastState?.flags || [],
-      confidence: {
-        tier: 'insufficient_evidence',
-        rationale: 'Candidate described a broad team outcome ("we") without specific personal engineering decisions or metrics. Probing ownership.',
-        coverage: 'Ownership unverified; systems design evidence pending.'
-      }
-    };
-
-    const responseText = roleType === 'ENGINEERING'
-      ? (isTeamClaim
-          ? `Which part of that pipeline optimization was your specific architectural contribution versus the rest of the team?
+  const responseText = roleType === 'ENGINEERING'
+    ? (isTeam
+        ? `What was your specific personal role and technical contribution on that project?
 
 <<<NOVA_STATE
 ${JSON.stringify(state, null, 2)}
 NOVA_STATE>>>`
-          : `What specific bottleneck did you diagnose in that system, and what tradeoffs drove your fix?
+        : `Could you give me a specific example of how you implemented that in code or architecture?
 
 <<<NOVA_STATE
 ${JSON.stringify(state, null, 2)}
 NOVA_STATE>>>`)
-      : `What did you personally say or do in that session to get the student engaged?
+    : `Could you share a specific story of how you helped a student through a difficult topic?
 
 <<<NOVA_STATE
 ${JSON.stringify(state, null, 2)}
 NOVA_STATE>>>`;
 
-    return { content: responseText, state };
-  }
-
-  // 5. Concrete Answer Provided: Bank Evidence & Shift Confidence!
-  if (roleType === 'ENGINEERING') {
-    const existingEvidence = lastState?.evidence || [];
-    const newEvidence = [
-      ...existingEvidence,
-      {
-        competency: 'Distributed Systems & Data Architecture',
-        claim: 'Engineered high-throughput Go ingestion pipeline with Kafka consumer partitioning',
-        specificity: 'concrete' as const,
-        verbatim: lastUserMsg.slice(0, 110) + '...'
-      },
-      {
-        competency: 'Performance Optimization & Latency',
-        claim: 'Reduced p99 database write latency from 420ms down to 65ms',
-        specificity: 'concrete' as const,
-        verbatim: 'cut p99 latency from 420ms to 65ms under 15k RPS load'
-      },
-      {
-        competency: 'Technical Tradeoffs & Storage',
-        claim: 'Chose Postgres tenant partitioning over MongoDB for ACID transaction guarantees',
-        specificity: 'concrete' as const,
-        verbatim: 'partitioned by tenant ID to avoid cross-shard locking'
-      }
-    ];
-
-    const state: NovaState = {
-      phase: 'screening',
-      topic: 'Fault Tolerance & Disaster Recovery',
-      probe_depth: 0,
-      last_answer_class: 'concrete',
-      evidence: newEvidence,
-      open_questions: lastState?.open_questions || [],
-      flags: lastState?.flags || [],
-      confidence: {
-        tier: 'high',
-        rationale: 'Candidate provided 3 concrete engineering claims across 2 competencies (Distributed Systems & Performance Optimization). Verified specific Kafka partition strategy and p99 reduction (420ms → 65ms).',
-        coverage: 'Evidenced: Distributed Systems, Performance, Storage Tradeoffs. Uncovered: On-call operations.'
-      }
-    };
-
-    const responseText = `That's clear on the Go consumer group partitioning. When Kafka brokers experienced partition rebalancing under that 15k RPS load, what broke first in your consumer offset management?
-
-<<<NOVA_STATE
-${JSON.stringify(state, null, 2)}
-NOVA_STATE>>>`;
-    return { content: responseText, state };
-  } else {
-    // Frontline Concrete response
-    const existingEvidence = lastState?.evidence || [];
-    const newEvidence = [
-      ...existingEvidence,
-      {
-        competency: 'Math Pedagogy & Simplification',
-        claim: 'Used visual fraction bar analogies to teach Grade 7 mixed fractions',
-        specificity: 'concrete' as const,
-        verbatim: lastUserMsg.slice(0, 100) + '...'
-      },
-      {
-        competency: 'Student Empathy & Patience',
-        claim: 'Spent 15 minutes rebuilding confidence before retesting quiz problems',
-        specificity: 'concrete' as const,
-        verbatim: 'paused the timer and let the student explain their thinking step by step'
-      }
-    ];
-
-    const state: NovaState = {
-      phase: 'screening',
-      topic: 'Parent Communication & Retention',
-      probe_depth: 0,
-      last_answer_class: 'concrete',
-      evidence: newEvidence,
-      open_questions: lastState?.open_questions || [],
-      flags: lastState?.flags || [],
-      confidence: {
-        tier: 'high',
-        rationale: 'Concrete pedagogy techniques cited with direct student dialogue examples. Demonstrated patience and visual teaching methods.',
-        coverage: 'Evidenced: Pedagogy, Empathy. Uncovered: Tech troubleshooting.'
-      }
-    };
-
-    const responseText = `That visual bar analogy makes total sense. How did the student's parents react when you shared that progress update?
-
-<<<NOVA_STATE
-${JSON.stringify(state, null, 2)}
-NOVA_STATE>>>`;
-    return { content: responseText, state };
-  }
+  return { content: responseText, state };
 }
