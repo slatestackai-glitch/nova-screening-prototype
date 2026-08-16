@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { RoleType, NovaState, ChatMessage } from '@/lib/types';
 import { parseNovaState, getProbeChipLabel, INITIAL_NOVA_STATE } from '@/lib/parseState';
-import { playAssistantVoice, stopAllVoice } from '@/lib/voiceEngine';
+import { playAssistantVoice, playCandidateVoice, stopAllVoice } from '@/lib/voiceEngine';
 import { SCRIPTED_TOUR_STEPS } from '@/lib/autoDemoScript';
 import { LandingPage } from '@/components/LandingPage';
 import { TopBar } from '@/components/TopBar';
@@ -13,9 +13,11 @@ import { PromptDrawer } from '@/components/PromptDrawer';
 import { SubmissionDocModal } from '@/components/SubmissionDocModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { AutoDemoTour } from '@/components/AutoDemoTour';
+import { PhoneCall, Activity } from 'lucide-react';
 
 export default function Home() {
   const [view, setView] = useState<'landing' | 'workspace'>('landing');
+  const [mobileTab, setMobileTab] = useState<'chat' | 'telemetry'>('chat');
   const [roleType, setRoleType] = useState<RoleType>('ENGINEERING');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentState, setCurrentState] = useState<NovaState>(INITIAL_NOVA_STATE);
@@ -183,7 +185,6 @@ export default function Home() {
       setMessages([assistantMsg]);
       setCurrentState(parsedState);
 
-      // Voice playback
       if (voiceEnabled) {
         playAssistantVoice(cleanText, {
           onStart: () => setIsSpeaking(true),
@@ -207,7 +208,7 @@ export default function Home() {
     setIsAutoDemoPlaying(true);
   };
 
-  // Execute Step in Scripted Tour
+  // Execute Step in Scripted Tour with Dual-Voice Sequence
   const renderTourStep = useCallback((stepIdx: number) => {
     const step = SCRIPTED_TOUR_STEPS[stepIdx];
     if (!step) return;
@@ -217,7 +218,7 @@ export default function Home() {
 
     const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // Build cumulative transcript history for the tour
+    // Build cumulative transcript history
     const newHistory: ChatMessage[] = [];
 
     for (let i = 0; i < stepIdx; i++) {
@@ -266,12 +267,23 @@ export default function Home() {
 
     setMessages(newHistory);
 
-    // Speak Nova's turn
+    // Two-way voice playback: candidate first, then recruiter
     if (voiceEnabled) {
-      playAssistantVoice(step.novaResponse, {
-        onStart: () => setIsSpeaking(true),
-        onEnd: () => setIsSpeaking(false)
-      });
+      if (step.candidateInput) {
+        playCandidateVoice(step.candidateInput, {
+          onEnd: () => {
+            playAssistantVoice(step.novaResponse, {
+              onStart: () => setIsSpeaking(true),
+              onEnd: () => setIsSpeaking(false)
+            });
+          }
+        });
+      } else {
+        playAssistantVoice(step.novaResponse, {
+          onStart: () => setIsSpeaking(true),
+          onEnd: () => setIsSpeaking(false)
+        });
+      }
     }
   }, [voiceEnabled]);
 
@@ -376,24 +388,55 @@ export default function Home() {
         }}
       />
 
+      {/* Mobile Tab Switcher (< lg screens) */}
+      <div className="lg:hidden flex items-center justify-around border-b border-slate-200/80 bg-white/80 backdrop-blur-md px-4 py-2">
+        <button
+          onClick={() => setMobileTab('chat')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            mobileTab === 'chat'
+              ? 'bg-slate-950 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-950'
+          }`}
+        >
+          <PhoneCall className="w-3.5 h-3.5" />
+          <span>Candidate Screen</span>
+        </button>
+
+        <button
+          onClick={() => setMobileTab('telemetry')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            mobileTab === 'telemetry'
+              ? 'bg-slate-950 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-950'
+          }`}
+        >
+          <Activity className="w-3.5 h-3.5" />
+          <span>Recruiter Console ({currentState.evidence.length})</span>
+        </button>
+      </div>
+
       {/* Main Split-Screen Workspace */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
         {/* Left: Chat Transcript & Candidate Call Simulator */}
-        <Chat
-          messages={messages}
-          isLoading={isLoading}
-          onSendMessage={(txt) => handleSendMessage(txt)}
-          roleType={roleType}
-          onStartScreen={() => handleStartScreen()}
-          isCallActive={messages.length > 0}
-          isSpeaking={isSpeaking}
-        />
+        <div className={`flex-1 h-full ${mobileTab === 'chat' ? 'flex' : 'hidden lg:flex'}`}>
+          <Chat
+            messages={messages}
+            isLoading={isLoading}
+            onSendMessage={(txt) => handleSendMessage(txt)}
+            roleType={roleType}
+            onStartScreen={() => handleStartScreen()}
+            isCallActive={messages.length > 0}
+            isSpeaking={isSpeaking}
+          />
+        </div>
 
         {/* Right: Recruiter Telemetry Console */}
-        <RecruiterConsole
-          state={currentState}
-          roleType={roleType}
-        />
+        <div className={`h-full ${mobileTab === 'telemetry' ? 'flex w-full' : 'hidden lg:flex'}`}>
+          <RecruiterConsole
+            state={currentState}
+            roleType={roleType}
+          />
+        </div>
       </div>
 
       {/* 60s Guided Demo Controller HUD */}

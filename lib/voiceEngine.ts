@@ -1,9 +1,11 @@
 'use client';
 
 /**
- * High-Quality Voice Engine for Nova
- * 1. ElevenLabs ultra-realistic neural voice streaming (if key configured).
- * 2. Natural-sounding, fluid, lively Browser Neural Voice fallback.
+ * High-End Dual-Voice Engine for Nova
+ * Supports two-way realistic phone conversations:
+ * 1. Recruiter Voice (Nova)
+ * 2. Candidate Voice (Alex / Priya)
+ * With ElevenLabs streaming and Web Speech fallback
  */
 
 let activeAudioElement: HTMLAudioElement | null = null;
@@ -11,15 +13,44 @@ let activeAudioElement: HTMLAudioElement | null = null;
 export interface VoicePlayOptions {
   voiceId?: string;
   clientKey?: string;
+  isCandidate?: boolean;
   onStart?: () => void;
   onEnd?: () => void;
 }
 
+/**
+ * Plays Recruiter (Nova) voice
+ */
 export async function playAssistantVoice(
   text: string,
   options: VoicePlayOptions = {}
 ): Promise<boolean> {
-  const { voiceId, clientKey, onStart, onEnd } = options;
+  return playVoiceAudio(text, {
+    ...options,
+    isCandidate: false,
+    voiceId: options.voiceId || (typeof window !== 'undefined' ? localStorage.getItem('nova_voice_id') || '21m00Tcm4TlvDq8ikWAM' : '21m00Tcm4TlvDq8ikWAM')
+  });
+}
+
+/**
+ * Plays Candidate (Alex/Priya) voice with distinct acoustic profile
+ */
+export async function playCandidateVoice(
+  text: string,
+  options: VoicePlayOptions = {}
+): Promise<boolean> {
+  return playVoiceAudio(text, {
+    ...options,
+    isCandidate: true,
+    voiceId: 'ErXwobaYiN019PkySvjV' // ElevenLabs Antoni / Male Candidate voice
+  });
+}
+
+async function playVoiceAudio(
+  text: string,
+  options: VoicePlayOptions = {}
+): Promise<boolean> {
+  const { voiceId, clientKey, isCandidate, onStart, onEnd } = options;
 
   stopAllVoice();
 
@@ -28,7 +59,10 @@ export async function playAssistantVoice(
     .replace(/[#*_`~↳]/g, '')
     .trim();
 
-  if (!cleanSpokenText) return false;
+  if (!cleanSpokenText) {
+    if (onEnd) onEnd();
+    return false;
+  }
 
   try {
     const storedElevenKey = typeof window !== 'undefined' ? localStorage.getItem('nova_elevenlabs_key') : null;
@@ -40,7 +74,7 @@ export async function playAssistantVoice(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: cleanSpokenText,
-          voiceId: voiceId || (typeof window !== 'undefined' ? localStorage.getItem('nova_voice_id') || '21m00Tcm4TlvDq8ikWAM' : '21m00Tcm4TlvDq8ikWAM'),
+          voiceId: voiceId || (isCandidate ? 'ErXwobaYiN019PkySvjV' : '21m00Tcm4TlvDq8ikWAM'),
           clientKey: keyToUse
         })
       });
@@ -67,7 +101,7 @@ export async function playAssistantVoice(
         audio.onerror = () => {
           URL.revokeObjectURL(audioUrl);
           activeAudioElement = null;
-          speakNaturalVoice(cleanSpokenText, onStart, onEnd);
+          speakNaturalVoice(cleanSpokenText, isCandidate, onStart, onEnd);
         };
 
         await audio.play();
@@ -75,18 +109,18 @@ export async function playAssistantVoice(
       }
     }
     
-    // Use natural neural voice fallback
-    return speakNaturalVoice(cleanSpokenText, onStart, onEnd);
+    return speakNaturalVoice(cleanSpokenText, isCandidate, onStart, onEnd);
   } catch (err) {
-    return speakNaturalVoice(cleanSpokenText, onStart, onEnd);
+    return speakNaturalVoice(cleanSpokenText, isCandidate, onStart, onEnd);
   }
 }
 
 /**
- * Enhanced natural-cadence speech synthesis
+ * Natural-cadence browser speech synthesis with distinct Candidate vs Recruiter timbres
  */
 function speakNaturalVoice(
   text: string,
+  isCandidate?: boolean,
   onStart?: () => void,
   onEnd?: () => void
 ): boolean {
@@ -99,25 +133,37 @@ function speakNaturalVoice(
 
   const utterance = new SpeechSynthesisUtterance(text);
   
-  // Fast, conversational human pace (1.12x rate prevents slow robotic drag)
-  utterance.rate = 1.12;
-  utterance.pitch = 1.02;
+  // Pace and pitch difference for Candidate vs Recruiter
+  if (isCandidate) {
+    utterance.rate = 1.15;
+    utterance.pitch = 0.95; // Slightly deeper natural pitch for candidate
+  } else {
+    utterance.rate = 1.10;
+    utterance.pitch = 1.05; // Clear, bright recruiter pitch
+  }
 
   const voices = window.speechSynthesis.getVoices();
   
-  // Prioritize Microsoft Natural, Google US English, Jenny, Aria, Samantha
-  const naturalVoice = voices.find(v => 
-    (v.name.includes('Natural') || 
-     v.name.includes('Jenny') || 
-     v.name.includes('Aria') || 
-     v.name.includes('Google US English') || 
-     v.name.includes('Samantha') || 
-     v.name.includes('Neural') ||
-     v.name.includes('Guy')) && v.lang.startsWith('en')
-  ) || voices.find(v => v.lang.startsWith('en'));
-
-  if (naturalVoice) {
-    utterance.voice = naturalVoice;
+  if (isCandidate) {
+    // Select male / distinct candidate voice
+    const candidateVoice = voices.find(v => 
+      (v.name.includes('Guy') || 
+       v.name.includes('David') || 
+       v.name.includes('George') || 
+       v.name.includes('Male')) && v.lang.startsWith('en')
+    ) || voices[0];
+    if (candidateVoice) utterance.voice = candidateVoice;
+  } else {
+    // Select natural female / recruiter voice
+    const recruiterVoice = voices.find(v => 
+      (v.name.includes('Natural') || 
+       v.name.includes('Jenny') || 
+       v.name.includes('Aria') || 
+       v.name.includes('Google US English') || 
+       v.name.includes('Samantha') || 
+       v.name.includes('Neural')) && v.lang.startsWith('en')
+    ) || voices[1] || voices[0];
+    if (recruiterVoice) utterance.voice = recruiterVoice;
   }
 
   if (onStart) utterance.onstart = onStart;
