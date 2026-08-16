@@ -1,12 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { buildSystemPrompt } from '@/lib/systemPrompt';
-import { parseNovaState } from '@/lib/parseState';
 import { generateSimulatedTurn } from '@/lib/simulationEngine';
+import { checkRateLimit } from '@/lib/rateLimiter';
 import { RoleType } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Rate Limiting Check
+    const clientIp = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'anonymous-client';
+    const rateLimit = checkRateLimit(clientIp, 15, 60000); // 15 req/min
+
+    if (!rateLimit.success) {
+      console.warn(`[Rate Limit Exceeded] IP: ${clientIp}. Falling back to simulation engine.`);
+      
+      const body = await req.json().catch(() => ({ messages: [], roleType: 'ENGINEERING' }));
+      const currentRole: RoleType = body.roleType === 'FRONTLINE' ? 'FRONTLINE' : 'ENGINEERING';
+      const simulated = generateSimulatedTurn(body.messages || [], currentRole);
+
+      return NextResponse.json(
+        {
+          role: 'assistant',
+          content: simulated.content,
+          mode: 'rate_limited_simulation',
+          warning: `Rate limit reached (${rateLimit.limit} req/min). Operating safely in enterprise simulation mode.`
+        },
+        {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': String(rateLimit.limit),
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': String(rateLimit.resetMs)
+          }
+        }
+      );
+    }
+
     const body = await req.json();
     const { messages, roleType, forceMode } = body as {
       messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
@@ -26,24 +55,31 @@ export async function POST(req: NextRequest) {
     const geminiApiKey = process.env.GEMINI_API_KEY;
     const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
-    // If explicit simulation mode is requested OR no API keys are present
+    // If explicit simulation mode is requested OR no API keys are present in env
     if (forceMode === 'simulation' || (!geminiApiKey && !anthropicApiKey)) {
       const simulated = generateSimulatedTurn(messages, currentRole);
-      return NextResponse.json({
-        role: 'assistant',
-        content: simulated.content,
-        mode: 'simulation',
-        warning: !geminiApiKey && !anthropicApiKey
-          ? 'API key not configured in environment (GEMINI_API_KEY). Running in enterprise simulation mode.'
-          : undefined
-      });
+      return NextResponse.json(
+        {
+          role: 'assistant',
+          content: simulated.content,
+          mode: 'simulation',
+          warning: !geminiApiKey && !anthropicApiKey
+            ? 'API key not configured in environment (GEMINI_API_KEY). Running in enterprise simulation mode.'
+            : undefined
+        },
+        {
+          headers: {
+            'X-RateLimit-Limit': String(rateLimit.limit),
+            'X-RateLimit-Remaining': String(rateLimit.remaining)
+          }
+        }
+      );
     }
 
-    // 1. Google Gemini Provider
+    // 2. Google Gemini Provider
     if (geminiApiKey) {
       try {
         const genAI = new GoogleGenerativeAI(geminiApiKey);
-        // Use gemini-2.0-flash or gemini-1.5-flash
         const model = genAI.getGenerativeModel({
           model: 'gemini-2.0-flash',
           systemInstruction: systemPrompt,
@@ -62,25 +98,32 @@ export async function POST(req: NextRequest) {
         const result = await model.generateContent({ contents });
         const responseText = result.response.text();
 
-        return NextResponse.json({
-          role: 'assistant',
-          content: responseText,
-          mode: 'gemini'
-        });
+        return NextResponse.json(
+          {
+            role: 'assistant',
+            content: responseText,
+            mode: 'gemini'
+          },
+          {
+            headers: {
+              'X-RateLimit-Limit': String(rateLimit.limit),
+              'X-RateLimit-Remaining': String(rateLimit.remaining)
+            }
+          }
+        );
       } catch (geminiError: any) {
         console.error('[Gemini API Error]', geminiError);
-        // Graceful fallback to simulation with error note
         const simulated = generateSimulatedTurn(messages, currentRole);
         return NextResponse.json({
           role: 'assistant',
           content: simulated.content,
           mode: 'simulation_fallback',
-          errorNote: `Gemini API call encountered an error: ${geminiError?.message || 'Check key and permissions'}. Switched to local simulation.`
+          errorNote: `Gemini API error: ${geminiError?.message || 'Check key'}. Safe simulation fallback activated.`
         });
       }
     }
 
-    // 2. Anthropic API Provider (if configured)
+    // 3. Anthropic API Provider (if configured)
     if (anthropicApiKey) {
       try {
         const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -109,11 +152,19 @@ export async function POST(req: NextRequest) {
         const data = await anthropicRes.json();
         const responseText = data.content?.[0]?.text || '';
 
-        return NextResponse.json({
-          role: 'assistant',
-          content: responseText,
-          mode: 'anthropic'
-        });
+        return NextResponse.json(
+          {
+            role: 'assistant',
+            content: responseText,
+            mode: 'anthropic'
+          },
+          {
+            headers: {
+              'X-RateLimit-Limit': String(rateLimit.limit),
+              'X-RateLimit-Remaining': String(rateLimit.remaining)
+            }
+          }
+        );
       } catch (anthropicError: any) {
         console.error('[Anthropic API Error]', anthropicError);
         const simulated = generateSimulatedTurn(messages, currentRole);

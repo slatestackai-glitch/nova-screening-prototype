@@ -1,8 +1,16 @@
 'use client';
 
 /**
- * Browser SpeechSynthesis Voice Engine for Nova
+ * Enhanced Browser SpeechSynthesis Voice Engine for Nova
+ * Prioritizes high-end Natural / Neural English voices
  */
+
+export function getAvailableVoices(): SpeechSynthesisVoice[] {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    return [];
+  }
+  return window.speechSynthesis.getVoices();
+}
 
 export function speakText(
   text: string,
@@ -16,26 +24,26 @@ export function speakText(
   // Cancel any ongoing speech
   window.speechSynthesis.cancel();
 
-  // Strip state blocks or markdown syntax from speech
+  // Strip state blocks and markdown
   const cleanSpoken = text
     .replace(/<<<NOVA_STATE[\s\S]*?NOVA_STATE>>>/g, '')
-    .replace(/[#*_`]/g, '')
+    .replace(/[#*_`~↳]/g, '')
     .trim();
 
   if (!cleanSpoken) return false;
 
   const utterance = new SpeechSynthesisUtterance(cleanSpoken);
-  utterance.rate = 1.05;
+  utterance.rate = 1.02;
   utterance.pitch = 1.0;
 
-  // Try to find a clean, natural English voice
+  // Prioritize highest quality English neural/natural voices
   const voices = window.speechSynthesis.getVoices();
-  const preferredVoice = voices.find(
-    v => (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Samantha') || v.name.includes('Karen') || v.lang.startsWith('en'))
-  );
+  const naturalVoice = voices.find(v => 
+    (v.name.includes('Natural') || v.name.includes('Google US English') || v.name.includes('Samantha') || v.name.includes('Jenny') || v.name.includes('Aria') || v.name.includes('Neural')) && v.lang.startsWith('en')
+  ) || voices.find(v => v.lang.startsWith('en'));
 
-  if (preferredVoice) {
-    utterance.voice = preferredVoice;
+  if (naturalVoice) {
+    utterance.voice = naturalVoice;
   }
 
   if (onStart) utterance.onstart = onStart;
