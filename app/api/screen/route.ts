@@ -82,13 +82,12 @@ export async function POST(req: NextRequest) {
         const genAI = new GoogleGenerativeAI(geminiApiKey);
         
         // Format & sanitize message history for Gemini API
-        // Rule: Gemini requires alternating user/model sequence and MUST start with 'user'
         const formattedContents: Array<{ role: 'user' | 'model'; parts: [{ text: string }] }> = [];
 
         if (messages.length === 0) {
           formattedContents.push({
             role: 'user',
-            parts: [{ text: 'The candidate just joined the phone call. Deliver Turn 1: Identity, disclosure, and consent.' }]
+            parts: [{ text: 'The candidate just joined the phone call. Deliver Turn 1: AI identity disclosure and call consent.' }]
           });
         } else {
           let hasStartedWithUser = false;
@@ -96,7 +95,6 @@ export async function POST(req: NextRequest) {
           for (const m of messages) {
             const role = m.role === 'assistant' ? 'model' : 'user';
             
-            // If the very first message is from model/assistant, prefix with user call connect
             if (!hasStartedWithUser && role === 'model') {
               formattedContents.push({
                 role: 'user',
@@ -109,7 +107,6 @@ export async function POST(req: NextRequest) {
 
             const lastItem = formattedContents[formattedContents.length - 1];
             if (lastItem && lastItem.role === role) {
-              // Merge identical consecutive roles
               lastItem.parts[0].text += `\n${m.content}`;
             } else {
               formattedContents.push({
@@ -120,27 +117,15 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Try gemini-1.5-flash or gemini-2.0-flash
-        let model;
-        try {
-          model = genAI.getGenerativeModel({
-            model: 'gemini-1.5-flash',
-            systemInstruction: systemPrompt,
-            generationConfig: {
-              temperature: 0.3,
-              maxOutputTokens: 1500,
-            }
-          });
-        } catch {
-          model = genAI.getGenerativeModel({
-            model: 'gemini-2.0-flash',
-            systemInstruction: systemPrompt,
-            generationConfig: {
-              temperature: 0.3,
-              maxOutputTokens: 1500,
-            }
-          });
-        }
+        // Use standard official model name: gemini-1.5-flash
+        const model = genAI.getGenerativeModel({
+          model: 'gemini-1.5-flash',
+          systemInstruction: systemPrompt,
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 1500,
+          }
+        });
 
         const result = await model.generateContent({ contents: formattedContents });
         const responseText = result.response.text();
@@ -225,13 +210,13 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: 'API key not configured. Please set GEMINI_API_KEY in your environment or settings modal.' },
+      { error: 'API key not configured.' },
       { status: 500 }
     );
   } catch (error: any) {
     console.error('[Route Handler Error]', error);
     return NextResponse.json(
-      { error: error?.message || 'Internal server error processing screening turn.' },
+      { error: error?.message || 'Internal server error.' },
       { status: 500 }
     );
   }
