@@ -10,12 +10,11 @@ import {
   User, 
   Bot, 
   Volume2, 
-  Phone,
-  ArrowRight,
-  Sparkles,
-  BarChart3,
+  Phone, 
+  ArrowRight, 
+  Sparkles, 
   Layers,
-  CheckCircle2
+  Radio
 } from 'lucide-react';
 
 interface ChatProps {
@@ -43,6 +42,7 @@ export const Chat: React.FC<ChatProps> = ({
 }) => {
   const [inputText, setInputText] = useState('');
   const [isRecordingMic, setIsRecordingMic] = useState(false);
+  const [micTranscript, setMicTranscript] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
 
@@ -52,7 +52,7 @@ export const Chat: React.FC<ChatProps> = ({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isLoading, isSpeaking]);
+  }, [messages, isLoading, isSpeaking, micTranscript]);
 
   useEffect(() => {
     if (messages.length === 1) {
@@ -65,6 +65,7 @@ export const Chat: React.FC<ChatProps> = ({
     if (!inputText.trim() || isLoading) return;
     onSendMessage(inputText.trim());
     setInputText('');
+    setMicTranscript('');
   };
 
   const handleQuickPrompt = (prompt: string) => {
@@ -72,45 +73,78 @@ export const Chat: React.FC<ChatProps> = ({
     onSendMessage(prompt);
   };
 
+  // Robust Live Speech-to-Text (STT) Engine with Interim Results
   const toggleSpeechRecognition = () => {
     if (typeof window === 'undefined') return;
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('Speech recognition is not supported in this browser. Please type your response.');
+      alert('Speech recognition is not supported in this browser. Please type your message.');
       return;
     }
 
     if (isRecordingMic) {
-      recognitionRef.current?.stop();
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
       setIsRecordingMic(false);
+      if (inputText.trim()) {
+        onSendMessage(inputText.trim());
+        setInputText('');
+        setMicTranscript('');
+      }
     } else {
-      const recognition = new SpeechRecognition();
-      recognition.lang = 'en-US';
-      recognition.continuous = false;
-      recognition.interimResults = false;
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'en-US';
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 1;
 
-      recognition.onstart = () => {
-        setIsRecordingMic(true);
-      };
+        recognition.onstart = () => {
+          setIsRecordingMic(true);
+          setMicTranscript('Listening...');
+        };
 
-      recognition.onresult = (event: any) => {
-        const spoken = event.results[0][0].transcript;
-        if (spoken) {
-          setInputText(spoken);
-        }
-      };
+        recognition.onresult = (event: any) => {
+          let interim = '';
+          let final = '';
 
-      recognition.onerror = () => {
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              final += transcript;
+            } else {
+              interim += transcript;
+            }
+          }
+
+          const currentSpoken = final || interim;
+          if (currentSpoken) {
+            setInputText(currentSpoken);
+            setMicTranscript(currentSpoken);
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          console.warn('[Speech Recognition Event]', event.error);
+          setIsRecordingMic(false);
+          setMicTranscript('');
+        };
+
+        recognition.onend = () => {
+          setIsRecordingMic(false);
+          setMicTranscript('');
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+      } catch (err) {
+        console.error('Failed to start speech recognition', err);
         setIsRecordingMic(false);
-      };
-
-      recognition.onend = () => {
-        setIsRecordingMic(false);
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
+      }
     }
   };
 
@@ -118,13 +152,13 @@ export const Chat: React.FC<ChatProps> = ({
   const confidenceTier = currentState.confidence?.tier || 'insufficient_evidence';
 
   return (
-    <div className="flex-1 flex flex-col bg-gradient-to-b from-slate-50/80 via-white to-slate-50/60 h-full overflow-hidden relative">
-      {/* Sleek Minimal Header */}
-      <div className="px-6 py-3.5 border-b border-slate-200/70 bg-white/80 backdrop-blur-xl flex items-center justify-between z-10">
+    <div className="flex-1 flex flex-col bg-slate-50/50 h-full overflow-hidden relative">
+      {/* Sleek Pastel Glass Top Bar */}
+      <div className="px-6 py-3.5 border-b border-slate-200/60 bg-white/80 backdrop-blur-xl flex items-center justify-between z-10 shadow-2xs">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className={`w-9 h-9 rounded-2xl flex items-center justify-center font-bold text-xs shadow-md ${
-              roleType === 'ENGINEERING' ? 'bg-slate-950 text-white' : 'bg-amber-600 text-white'
+            <div className={`w-9 h-9 rounded-2xl flex items-center justify-center font-bold text-xs shadow-xs ${
+              roleType === 'ENGINEERING' ? 'bg-slate-900 text-white' : 'bg-amber-600 text-white'
             }`}>
               <Bot className="w-5 h-5" />
             </div>
@@ -137,22 +171,22 @@ export const Chat: React.FC<ChatProps> = ({
               <h3 className="text-xs font-bold text-slate-950">
                 Nova AI Recruiter
               </h3>
-              <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                {roleType === 'ENGINEERING' ? 'Candidate: Alex (Backend)' : 'Candidate: Priya (Math Tutor)'}
+              <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100/90 text-slate-700 border border-slate-200">
+                {roleType === 'ENGINEERING' ? 'Candidate: Alex' : 'Candidate: Priya'}
               </span>
             </div>
             <p className="text-[11px] text-slate-500 font-medium">
-              {isCallActive ? 'Live Phone Screening In Progress' : 'Standby • Ready to Start'}
+              {isCallActive ? 'Live Phone Screening Active' : 'Standby • Ready to Start'}
             </p>
           </div>
         </div>
 
-        {/* Right Header: Floating Insights Trigger Pill & Voice Indicator */}
+        {/* Floating Evaluation Trigger Pill & Voice Status */}
         <div className="flex items-center gap-2.5">
           {isSpeaking && (
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold border border-indigo-200 animate-pulse shadow-2xs">
-              <Volume2 className="w-3.5 h-3.5" />
-              <span>Nova Speaking...</span>
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-semibold border border-slate-200 animate-pulse shadow-2xs">
+              <Volume2 className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Nova Speaking</span>
             </div>
           )}
 
@@ -162,7 +196,7 @@ export const Chat: React.FC<ChatProps> = ({
             title="Open Live Evaluation & Skills Drawer"
           >
             <Layers className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Candidate Evaluation</span>
+            <span>Candidate Insights</span>
             <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
               confidenceTier === 'high' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
             }`}>
@@ -172,7 +206,7 @@ export const Chat: React.FC<ChatProps> = ({
         </div>
       </div>
 
-      {/* Main Conversation Feed (Centered, Spacious, Lambo-Grade) */}
+      {/* Main Conversation Feed (Centered, Pastel Glass Aesthetics) */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6 max-w-4xl mx-auto w-full">
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto my-auto">
@@ -183,7 +217,7 @@ export const Chat: React.FC<ChatProps> = ({
               Ready to Launch Phone Screen
             </h4>
             <p className="text-xs sm:text-sm text-slate-600 mb-6 leading-relaxed font-normal">
-              Nova introduces herself upfront as an AI, frames the conversation, actively probes vague claims, and builds a verified skills evaluation.
+              Nova introduces herself upfront as an AI, frames the agenda, actively probes vague claims, and builds a verified skills evaluation.
             </p>
             <button
               onClick={onStartScreen}
@@ -216,16 +250,16 @@ export const Chat: React.FC<ChatProps> = ({
                   <div className={`w-8 h-8 rounded-2xl flex items-center justify-center shrink-0 text-xs font-bold shadow-xs ${
                     isAssistant
                       ? 'bg-slate-950 text-white'
-                      : 'bg-indigo-600 text-white'
+                      : 'bg-slate-800 text-white'
                   }`}>
                     {isAssistant ? 'N' : <User className="w-4 h-4" />}
                   </div>
 
-                  {/* Speech Card */}
+                  {/* Pastel Glass Speech Cards */}
                   <div className={`p-4 sm:p-5 rounded-3xl text-xs sm:text-sm leading-relaxed ${
                     isAssistant
-                      ? 'bg-white border border-slate-200/90 text-slate-900 font-normal shadow-xs'
-                      : 'bg-indigo-600 text-white font-medium shadow-md'
+                      ? 'bg-white/95 border border-slate-200/90 text-slate-900 font-normal shadow-xs backdrop-blur-md'
+                      : 'bg-slate-900 text-white font-medium shadow-md'
                   }`}>
                     <p className="whitespace-pre-wrap font-sans">
                       {msg.cleanContent || msg.content}
@@ -241,6 +275,19 @@ export const Chat: React.FC<ChatProps> = ({
           })
         )}
 
+        {/* Real-Time Mic Transcribing Indicator */}
+        {isRecordingMic && micTranscript && (
+          <div className="flex items-start gap-3 max-w-[85%] ml-auto flex-row-reverse animate-in fade-in">
+            <div className="w-8 h-8 rounded-2xl bg-rose-500 text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-md animate-pulse">
+              <Mic className="w-4 h-4" />
+            </div>
+            <div className="p-4 rounded-3xl bg-rose-50 border border-rose-200 text-rose-950 text-xs sm:text-sm shadow-xs italic font-medium flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+              <span>&ldquo;{micTranscript}&rdquo;</span>
+            </div>
+          </div>
+        )}
+
         {/* Loading Spinner Bubble */}
         {isLoading && (
           <div className="flex items-start gap-3 max-w-[80%] animate-in fade-in">
@@ -251,7 +298,7 @@ export const Chat: React.FC<ChatProps> = ({
               <span className="w-2 h-2 rounded-full bg-slate-900 animate-pulse" />
               <span className="w-2 h-2 rounded-full bg-slate-900 animate-pulse delay-150" />
               <span className="w-2 h-2 rounded-full bg-slate-900 animate-pulse delay-300" />
-              <span className="text-slate-600 font-semibold ml-1">Nova is analyzing and listening...</span>
+              <span className="text-slate-600 font-semibold ml-1">Nova is listening...</span>
             </div>
           </div>
         )}
@@ -261,7 +308,7 @@ export const Chat: React.FC<ChatProps> = ({
 
       {/* Suggested Quick Prompts Bar */}
       {isCallActive && (
-        <div className="px-6 py-2 bg-white/70 backdrop-blur-md border-t border-slate-100 flex items-center gap-2 overflow-x-auto text-xs max-w-4xl mx-auto w-full">
+        <div className="px-6 py-2 bg-white/70 backdrop-blur-md border-t border-slate-200/60 flex items-center gap-2 overflow-x-auto text-xs max-w-4xl mx-auto w-full">
           <span className="text-slate-400 font-semibold shrink-0 text-[11px]">Quick prompts:</span>
           
           <button
@@ -298,21 +345,21 @@ export const Chat: React.FC<ChatProps> = ({
         </div>
       )}
 
-      {/* Input Form */}
-      <form onSubmit={handleSubmit} className="p-4 border-t border-slate-200 bg-white shadow-lg">
+      {/* Input Form with Live Voice Support */}
+      <form onSubmit={handleSubmit} className="p-4 border-t border-slate-200/80 bg-white/95 shadow-lg backdrop-blur-xl">
         <div className="relative flex items-center gap-2 max-w-4xl mx-auto">
-          {/* Voice Input Mic */}
+          {/* Real-time Voice Input Mic */}
           <button
             type="button"
             onClick={toggleSpeechRecognition}
-            className={`p-3 rounded-2xl border transition-all ${
+            className={`p-3.5 rounded-2xl border transition-all ${
               isRecordingMic
-                ? 'bg-rose-50 border-rose-300 text-rose-600 animate-pulse shadow-md'
+                ? 'bg-rose-500 border-rose-600 text-white animate-pulse shadow-md'
                 : 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700'
             }`}
-            title="Speak your reply"
+            title={isRecordingMic ? 'Listening... click to send voice message' : 'Speak candidate answer (Voice Input)'}
           >
-            {isRecordingMic ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            {isRecordingMic ? <Radio className="w-4 h-4 animate-spin" /> : <Mic className="w-4 h-4" />}
           </button>
 
           <input
@@ -320,8 +367,8 @@ export const Chat: React.FC<ChatProps> = ({
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             disabled={isLoading}
-            placeholder={isCallActive ? 'Type your reply or click a quick prompt above...' : 'Click "Begin Phone Interview" to start call...'}
-            className="flex-1 bg-slate-100/80 border border-slate-200/90 rounded-2xl px-5 py-3 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-slate-950 focus:bg-white transition-all disabled:opacity-50"
+            placeholder={isRecordingMic ? 'Listening to your voice...' : isCallActive ? 'Type or speak your reply...' : 'Click "Begin Phone Interview" to start call...'}
+            className="flex-1 bg-slate-100/80 border border-slate-200/90 rounded-2xl px-5 py-3 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-slate-950 focus:bg-white transition-all disabled:opacity-50 font-sans"
           />
 
           <button
