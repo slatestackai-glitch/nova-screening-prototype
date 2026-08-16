@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { RoleType, NovaState, ChatMessage } from '@/lib/types';
 import { parseNovaState, getProbeChipLabel, INITIAL_NOVA_STATE } from '@/lib/parseState';
-import { playAssistantVoice, playCandidateVoice, stopAllVoice } from '@/lib/voiceEngine';
+import { playAssistantVoice, stopAllVoice } from '@/lib/voiceEngine';
 import { SCRIPTED_TOUR_STEPS } from '@/lib/autoDemoScript';
 import { LandingPage } from '@/components/LandingPage';
 import { TopBar } from '@/components/TopBar';
@@ -13,11 +13,9 @@ import { PromptDrawer } from '@/components/PromptDrawer';
 import { SubmissionDocModal } from '@/components/SubmissionDocModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { AutoDemoTour } from '@/components/AutoDemoTour';
-import { PhoneCall, Activity } from 'lucide-react';
 
 export default function Home() {
   const [view, setView] = useState<'landing' | 'workspace'>('landing');
-  const [mobileTab, setMobileTab] = useState<'chat' | 'telemetry'>('chat');
   const [roleType, setRoleType] = useState<RoleType>('ENGINEERING');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentState, setCurrentState] = useState<NovaState>(INITIAL_NOVA_STATE);
@@ -25,6 +23,7 @@ export default function Home() {
   const [isPromptDrawerOpen, setIsPromptDrawerOpen] = useState<boolean>(false);
   const [isSubmissionDocOpen, setIsSubmissionDocOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState<boolean>(false);
   const [confirmRoleSwitch, setConfirmRoleSwitch] = useState<RoleType | null>(null);
 
   // Voice State
@@ -127,7 +126,6 @@ export default function Home() {
       setMessages(finalMessages);
       setCurrentState(parsedState);
 
-      // Voice playback
       if (voiceEnabled) {
         playAssistantVoice(cleanText, {
           onStart: () => setIsSpeaking(true),
@@ -208,7 +206,7 @@ export default function Home() {
     setIsAutoDemoPlaying(true);
   };
 
-  // Execute Step in Scripted Tour with Dual-Voice Sequence
+  // Execute Step in Scripted Tour
   const renderTourStep = useCallback((stepIdx: number) => {
     const step = SCRIPTED_TOUR_STEPS[stepIdx];
     if (!step) return;
@@ -218,7 +216,6 @@ export default function Home() {
 
     const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // Build cumulative transcript history
     const newHistory: ChatMessage[] = [];
 
     for (let i = 0; i < stepIdx; i++) {
@@ -267,23 +264,11 @@ export default function Home() {
 
     setMessages(newHistory);
 
-    // Two-way voice playback: candidate first, then recruiter
     if (voiceEnabled) {
-      if (step.candidateInput) {
-        playCandidateVoice(step.candidateInput, {
-          onEnd: () => {
-            playAssistantVoice(step.novaResponse, {
-              onStart: () => setIsSpeaking(true),
-              onEnd: () => setIsSpeaking(false)
-            });
-          }
-        });
-      } else {
-        playAssistantVoice(step.novaResponse, {
-          onStart: () => setIsSpeaking(true),
-          onEnd: () => setIsSpeaking(false)
-        });
-      }
+      playAssistantVoice(step.novaResponse, {
+        onStart: () => setIsSpeaking(true),
+        onEnd: () => setIsSpeaking(false)
+      });
     }
   }, [voiceEnabled]);
 
@@ -363,10 +348,10 @@ export default function Home() {
     );
   }
 
-  // Render Workspace Split-Screen View
+  // Render Workspace Full-Screen View
   return (
     <main className="h-screen w-screen flex flex-col bg-slate-50 mesh-gradient-bg overflow-hidden">
-      {/* Glassmorphic TopBar */}
+      {/* TopBar */}
       <TopBar
         roleType={roleType}
         onRoleChange={handleRoleChangeRequest}
@@ -388,56 +373,28 @@ export default function Home() {
         }}
       />
 
-      {/* Mobile Tab Switcher (< lg screens) */}
-      <div className="lg:hidden flex items-center justify-around border-b border-slate-200/80 bg-white/80 backdrop-blur-md px-4 py-2">
-        <button
-          onClick={() => setMobileTab('chat')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
-            mobileTab === 'chat'
-              ? 'bg-slate-950 text-white shadow-xs'
-              : 'text-slate-600 hover:text-slate-950'
-          }`}
-        >
-          <PhoneCall className="w-3.5 h-3.5" />
-          <span>Candidate Screen</span>
-        </button>
-
-        <button
-          onClick={() => setMobileTab('telemetry')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
-            mobileTab === 'telemetry'
-              ? 'bg-slate-950 text-white shadow-xs'
-              : 'text-slate-600 hover:text-slate-950'
-          }`}
-        >
-          <Activity className="w-3.5 h-3.5" />
-          <span>Recruiter Console ({currentState.evidence.length})</span>
-        </button>
+      {/* Main Full-Width Conversation Canvas */}
+      <div className="flex-1 flex overflow-hidden relative">
+        <Chat
+          messages={messages}
+          isLoading={isLoading}
+          onSendMessage={(txt) => handleSendMessage(txt)}
+          roleType={roleType}
+          onStartScreen={() => handleStartScreen()}
+          isCallActive={messages.length > 0}
+          isSpeaking={isSpeaking}
+          currentState={currentState}
+          onOpenAnalytics={() => setIsAnalyticsOpen(true)}
+        />
       </div>
 
-      {/* Main Split-Screen Workspace */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
-        {/* Left: Chat Transcript & Candidate Call Simulator */}
-        <div className={`flex-1 h-full ${mobileTab === 'chat' ? 'flex' : 'hidden lg:flex'}`}>
-          <Chat
-            messages={messages}
-            isLoading={isLoading}
-            onSendMessage={(txt) => handleSendMessage(txt)}
-            roleType={roleType}
-            onStartScreen={() => handleStartScreen()}
-            isCallActive={messages.length > 0}
-            isSpeaking={isSpeaking}
-          />
-        </div>
-
-        {/* Right: Recruiter Telemetry Console */}
-        <div className={`h-full ${mobileTab === 'telemetry' ? 'flex w-full' : 'hidden lg:flex'}`}>
-          <RecruiterConsole
-            state={currentState}
-            roleType={roleType}
-          />
-        </div>
-      </div>
+      {/* Slide-Up Candidate Evaluation & Insights Drawer */}
+      <RecruiterConsole
+        state={currentState}
+        roleType={roleType}
+        isOpen={isAnalyticsOpen}
+        onClose={() => setIsAnalyticsOpen(false)}
+      />
 
       {/* 60s Guided Demo Controller HUD */}
       <AutoDemoTour
@@ -481,7 +438,7 @@ export default function Home() {
           <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 shadow-2xl space-y-4">
             <h3 className="text-sm font-bold text-slate-950">Switch Role Type?</h3>
             <p className="text-xs text-slate-600 leading-relaxed font-medium">
-              Switching to <strong className="text-slate-950">{confirmRoleSwitch}</strong> mid-screen will reset the active call transcript and recruiter state.
+              Switching to <strong className="text-slate-950">{confirmRoleSwitch}</strong> mid-screen will reset the active call transcript and evaluation state.
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button
