@@ -3,14 +3,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { RoleType, NovaState, ChatMessage } from '@/lib/types';
 import { parseNovaState, getProbeChipLabel, INITIAL_NOVA_STATE } from '@/lib/parseState';
-import { speakText, stopSpeaking } from '@/lib/voiceEngine';
-import { SCRIPTED_TOUR_STEPS, ScriptedTourStep } from '@/lib/autoDemoScript';
+import { playAssistantVoice, stopAllVoice } from '@/lib/voiceEngine';
+import { SCRIPTED_TOUR_STEPS } from '@/lib/autoDemoScript';
 import { LandingPage } from '@/components/LandingPage';
 import { TopBar } from '@/components/TopBar';
 import { Chat } from '@/components/Chat';
 import { RecruiterConsole } from '@/components/RecruiterConsole';
 import { PromptDrawer } from '@/components/PromptDrawer';
 import { SubmissionDocModal } from '@/components/SubmissionDocModal';
+import { SettingsModal } from '@/components/SettingsModal';
 import { AutoDemoTour } from '@/components/AutoDemoTour';
 
 export default function Home() {
@@ -21,6 +22,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isPromptDrawerOpen, setIsPromptDrawerOpen] = useState<boolean>(false);
   const [isSubmissionDocOpen, setIsSubmissionDocOpen] = useState<boolean>(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [confirmRoleSwitch, setConfirmRoleSwitch] = useState<RoleType | null>(null);
 
   // Voice State
@@ -37,7 +39,7 @@ export default function Home() {
   // Reset conversation and state
   const handleReset = useCallback(() => {
     if (autoDemoTimerRef.current) clearTimeout(autoDemoTimerRef.current);
-    stopSpeaking();
+    stopAllVoice();
     setIsSpeaking(false);
     setIsAutoDemoActive(false);
     setIsAutoDemoPlaying(false);
@@ -83,6 +85,8 @@ export default function Home() {
     setMessages(updatedMessages);
     setIsLoading(true);
 
+    const clientGeminiKey = typeof window !== 'undefined' ? localStorage.getItem('nova_gemini_key') || undefined : undefined;
+
     try {
       const response = await fetch('/api/screen', {
         method: 'POST',
@@ -92,7 +96,8 @@ export default function Home() {
             role: m.role,
             content: m.content
           })),
-          roleType: activeRole
+          roleType: activeRole,
+          clientGeminiKey
         })
       });
 
@@ -120,21 +125,20 @@ export default function Home() {
       setMessages(finalMessages);
       setCurrentState(parsedState);
 
-      // Voice synthesis
+      // Voice playback
       if (voiceEnabled) {
-        speakText(
-          cleanText,
-          () => setIsSpeaking(true),
-          () => setIsSpeaking(false)
-        );
+        playAssistantVoice(cleanText, {
+          onStart: () => setIsSpeaking(true),
+          onEnd: () => setIsSpeaking(false)
+        });
       }
     } catch (err: any) {
       console.error('[Nova Client Error]', err);
       const errorMsg: ChatMessage = {
         id: `err-${Date.now()}`,
         role: 'assistant',
-        content: 'Error communicating with screening engine. Please verify server connection.',
-        cleanContent: 'Error communicating with screening engine. Please verify server connection.',
+        content: 'Error communicating with screening engine. Operating in local safe mode.',
+        cleanContent: 'Error communicating with screening engine. Operating in local safe mode.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, errorMsg]);
@@ -149,13 +153,16 @@ export default function Home() {
     handleReset();
     setIsLoading(true);
 
+    const clientGeminiKey = typeof window !== 'undefined' ? localStorage.getItem('nova_gemini_key') || undefined : undefined;
+
     try {
       const response = await fetch('/api/screen', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [],
-          roleType: roleToUse
+          roleType: roleToUse,
+          clientGeminiKey
         })
       });
 
@@ -176,13 +183,12 @@ export default function Home() {
       setMessages([assistantMsg]);
       setCurrentState(parsedState);
 
-      // Voice synthesis
+      // Voice playback
       if (voiceEnabled) {
-        speakText(
-          cleanText,
-          () => setIsSpeaking(true),
-          () => setIsSpeaking(false)
-        );
+        playAssistantVoice(cleanText, {
+          onStart: () => setIsSpeaking(true),
+          onEnd: () => setIsSpeaking(false)
+        });
       }
     } catch (err) {
       console.error('Failed to start screen', err);
@@ -214,7 +220,6 @@ export default function Home() {
     // Build cumulative transcript history for the tour
     const newHistory: ChatMessage[] = [];
 
-    // Include prior turns up to this step
     for (let i = 0; i < stepIdx; i++) {
       const prev = SCRIPTED_TOUR_STEPS[i];
       if (prev.roleType === step.roleType) {
@@ -239,7 +244,6 @@ export default function Home() {
       }
     }
 
-    // Add current turn
     if (step.candidateInput) {
       newHistory.push({
         id: `tour-user-${stepIdx}`,
@@ -264,15 +268,13 @@ export default function Home() {
 
     // Speak Nova's turn
     if (voiceEnabled) {
-      speakText(
-        step.novaResponse,
-        () => setIsSpeaking(true),
-        () => setIsSpeaking(false)
-      );
+      playAssistantVoice(step.novaResponse, {
+        onStart: () => setIsSpeaking(true),
+        onEnd: () => setIsSpeaking(false)
+      });
     }
   }, [voiceEnabled]);
 
-  // Driven Timer for Auto Tour
   useEffect(() => {
     if (!isAutoDemoActive || !isAutoDemoPlaying) {
       if (autoDemoTimerRef.current) clearTimeout(autoDemoTimerRef.current);
@@ -327,6 +329,7 @@ export default function Home() {
           onStartAutoTour={startAutoDemo}
           onOpenPrompt={() => setIsPromptDrawerOpen(true)}
           onOpenSubmissionDoc={() => setIsSubmissionDocOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
         />
 
         <PromptDrawer
@@ -339,14 +342,19 @@ export default function Home() {
           isOpen={isSubmissionDocOpen}
           onClose={() => setIsSubmissionDocOpen(false)}
         />
+
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+        />
       </>
     );
   }
 
   // Render Workspace Split-Screen View
   return (
-    <main className="h-screen w-screen flex flex-col bg-slate-50 overflow-hidden">
-      {/* Clean Light TopBar */}
+    <main className="h-screen w-screen flex flex-col bg-slate-50 mesh-gradient-bg overflow-hidden">
+      {/* Glassmorphic TopBar */}
       <TopBar
         roleType={roleType}
         onRoleChange={handleRoleChangeRequest}
@@ -354,6 +362,7 @@ export default function Home() {
         onReset={handleReset}
         onOpenPrompt={() => setIsPromptDrawerOpen(true)}
         onOpenSubmissionDoc={() => setIsSubmissionDocOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         onStartAutoDemo={startAutoDemo}
         isAutoDemoActive={isAutoDemoActive}
         isCallActive={messages.length > 0}
@@ -362,7 +371,7 @@ export default function Home() {
         onBackToLanding={() => setView('landing')}
         voiceEnabled={voiceEnabled}
         onToggleVoice={() => {
-          if (voiceEnabled) stopSpeaking();
+          if (voiceEnabled) stopAllVoice();
           setVoiceEnabled(!voiceEnabled);
         }}
       />
@@ -417,24 +426,30 @@ export default function Home() {
         onClose={() => setIsSubmissionDocOpen(false)}
       />
 
+      {/* In-App API Key & Voice Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+      />
+
       {/* Role Switch Confirmation Modal */}
       {confirmRoleSwitch && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl p-6 shadow-xl space-y-4">
-            <h3 className="text-sm font-bold text-slate-900">Switch Role Type?</h3>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Switching to <strong className="text-slate-900">{confirmRoleSwitch}</strong> mid-screen will reset the active call transcript and recruiter state.
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 shadow-2xl space-y-4">
+            <h3 className="text-sm font-bold text-slate-950">Switch Role Type?</h3>
+            <p className="text-xs text-slate-600 leading-relaxed font-medium">
+              Switching to <strong className="text-slate-950">{confirmRoleSwitch}</strong> mid-screen will reset the active call transcript and recruiter state.
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setConfirmRoleSwitch(null)}
-                className="px-3.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium"
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmSwitchRole}
-                className="px-4 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium"
+                className="px-4.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-white text-xs font-bold shadow-xs"
               >
                 Switch & Reset
               </button>

@@ -10,10 +10,7 @@ import {
   ArrowRight, 
   FileText,
   FileCode,
-  ShieldCheck,
-  Zap,
-  Activity,
-  Volume2
+  Settings
 } from 'lucide-react';
 
 interface LandingPageProps {
@@ -23,6 +20,7 @@ interface LandingPageProps {
   onStartAutoTour: () => void;
   onOpenPrompt: () => void;
   onOpenSubmissionDoc: () => void;
+  onOpenSettings: () => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
@@ -31,7 +29,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onStartInteractive,
   onStartAutoTour,
   onOpenPrompt,
-  onOpenSubmissionDoc
+  onOpenSubmissionDoc,
+  onOpenSettings
 }) => {
   return (
     <div className="min-h-screen mesh-gradient-bg text-slate-900 flex flex-col justify-between relative overflow-hidden">
@@ -66,6 +65,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           >
             <FileCode className="w-3.5 h-3.5 text-slate-500" />
             <span>Prompt Spec</span>
+          </button>
+
+          <button
+            onClick={onOpenSettings}
+            className="p-2 rounded-xl border border-slate-200/80 hover:border-slate-300 bg-white/80 hover:bg-white text-slate-700 hover:text-slate-950 transition-all shadow-2xs backdrop-blur-md"
+            title="Configure API Keys & Voices"
+          >
+            <Settings className="w-4 h-4" />
           </button>
           
           <button

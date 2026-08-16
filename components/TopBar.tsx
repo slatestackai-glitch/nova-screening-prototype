@@ -13,7 +13,7 @@ import {
   Volume2,
   VolumeX,
   FileText,
-  ShieldCheck
+  Settings
 } from 'lucide-react';
 
 interface TopBarProps {
@@ -23,6 +23,7 @@ interface TopBarProps {
   onReset: () => void;
   onOpenPrompt: () => void;
   onOpenSubmissionDoc: () => void;
+  onOpenSettings: () => void;
   onStartAutoDemo: () => void;
   isAutoDemoActive: boolean;
   isCallActive: boolean;
@@ -40,6 +41,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onReset,
   onOpenPrompt,
   onOpenSubmissionDoc,
+  onOpenSettings,
   onStartAutoDemo,
   isAutoDemoActive,
   isCallActive,
@@ -175,14 +177,13 @@ export const TopBar: React.FC<TopBarProps> = ({
           </button>
         )}
 
-        {/* Prompt Spec Drawer */}
+        {/* Settings Button */}
         <button
-          onClick={onOpenPrompt}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-card hover:bg-white text-slate-700 text-xs font-medium transition-all shadow-2xs"
-          title="View Prompt Spec"
+          onClick={onOpenSettings}
+          className="p-2 rounded-xl glass-card hover:bg-white text-slate-700 hover:text-slate-950 transition-all shadow-2xs"
+          title="API Keys & Voice Settings"
         >
-          <FileCode className="w-3.5 h-3.5 text-slate-500" />
-          <span className="hidden xl:inline">Prompt Spec</span>
+          <Settings className="w-4 h-4" />
         </button>
       </div>
     </header>

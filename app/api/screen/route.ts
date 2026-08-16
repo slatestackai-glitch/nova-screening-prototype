@@ -7,13 +7,12 @@ import { RoleType } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Rate Limiting Check
+    // 1. Rate Limiting Check (15 req/min)
     const clientIp = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'anonymous-client';
-    const rateLimit = checkRateLimit(clientIp, 15, 60000); // 15 req/min
+    const rateLimit = checkRateLimit(clientIp, 15, 60000);
 
     if (!rateLimit.success) {
-      console.warn(`[Rate Limit Exceeded] IP: ${clientIp}. Falling back to simulation engine.`);
-      
+      console.warn(`[Rate Limit Exceeded] IP: ${clientIp}. Falling back to simulation.`);
       const body = await req.json().catch(() => ({ messages: [], roleType: 'ENGINEERING' }));
       const currentRole: RoleType = body.roleType === 'FRONTLINE' ? 'FRONTLINE' : 'ENGINEERING';
       const simulated = generateSimulatedTurn(body.messages || [], currentRole);
@@ -37,10 +36,11 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { messages, roleType, forceMode } = body as {
+    const { messages, roleType, forceMode, clientGeminiKey } = body as {
       messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
       roleType: RoleType;
       forceMode?: 'live' | 'simulation';
+      clientGeminiKey?: string;
     };
 
     if (!messages || !Array.isArray(messages)) {
@@ -52,10 +52,10 @@ export async function POST(req: NextRequest) {
 
     const currentRole: RoleType = roleType === 'FRONTLINE' ? 'FRONTLINE' : 'ENGINEERING';
     const systemPrompt = buildSystemPrompt(currentRole);
-    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const geminiApiKey = clientGeminiKey || process.env.GEMINI_API_KEY;
     const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
-    // If explicit simulation mode is requested OR no API keys are present in env
+    // If explicit simulation mode is requested OR no API keys are present in env/session
     if (forceMode === 'simulation' || (!geminiApiKey && !anthropicApiKey)) {
       const simulated = generateSimulatedTurn(messages, currentRole);
       return NextResponse.json(
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
           content: simulated.content,
           mode: 'simulation',
           warning: !geminiApiKey && !anthropicApiKey
-            ? 'API key not configured in environment (GEMINI_API_KEY). Running in enterprise simulation mode.'
+            ? 'API key not configured. Running in enterprise simulation mode.'
             : undefined
         },
         {
@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
           role: 'assistant',
           content: simulated.content,
           mode: 'simulation_fallback',
-          errorNote: `Gemini API error: ${geminiError?.message || 'Check key'}. Safe simulation fallback activated.`
+          errorNote: `Gemini API error: ${geminiError?.message || 'Invalid key'}. Switched to local simulation.`
         });
       }
     }
@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: 'API key not configured. Please set GEMINI_API_KEY in your environment.' },
+      { error: 'API key not configured. Please set GEMINI_API_KEY in your environment or settings modal.' },
       { status: 500 }
     );
   } catch (error: any) {
